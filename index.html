@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Генератор паролей — без сервера</title>
+<style>
+  body{font-family:Inter,system-ui,Segoe UI,Arial;margin:24px;background:#0f1720;color:#e6eef8}
+  .card{max-width:720px;margin:0 auto;padding:20px;border-radius:12px;background:linear-gradient(180deg,#111827, #0b1220);box-shadow:0 6px 30px rgba(2,6,23,.6)}
+  h1{margin:0 0 14px;font-size:20px}
+  label{display:flex;align-items:center;gap:8px;margin:8px 0}
+  input[type=number]{width:84px;padding:6px;border-radius:6px;border:1px solid #263142;background:#071226;color:#e6eef8}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  button{padding:8px 12px;border-radius:8px;background:#10b981;border:none;color:#03121a;cursor:pointer}
+  .out{margin-top:14px;padding:12px;border-radius:8px;background:#041021;font-family:monospace;word-break:break-all}
+  small{color:#9fb0c7}
+  .controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .footer{margin-top:14px;color:#93b4c9;font-size:13px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔐 Генератор паролей — работает без сервера</h1>
+  <div class="row">
+    <label>Длина: <input id="length" type="number" min="4" max="200" value="12"></label>
+
+    <div style="flex:1">
+      <label><input id="latin" type="checkbox" checked> Латинские буквы</label>
+      <label><input id="cyr" type="checkbox"> Кириллица</label>
+      <label><input id="digits" type="checkbox" checked> Цифры</label>
+      <label><input id="special" type="checkbox"> Спецсимволы</label>
+    </div>
+
+    <div style="flex:1">
+      <label>Регистр:
+        <select id="case">
+          <option value="both" selected>Маленькие и большие</option>
+          <option value="lower">Только маленькие</option>
+          <option value="upper">Только большие</option>
+        </select>
+      </label>
+      <label><input id="avoidSimilar" type="checkbox"> Исключить похожие символы (O,0,I,l)</label>
+      <label><input id="count" type="number" min="1" max="20" value="1"> Кол-во паролей</label>
+    </div>
+  </div>
+
+  <div style="margin-top:12px">
+    <button id="gen">Сгенерировать</button>
+    <button id="clear">Очистить</button>
+    <button id="copy" title="Скопировать">Копировать</button>
+  </div>
+
+  <div id="out" class="out" aria-live="polite"></div>
+
+  <div class="footer">
+    Генерация происходит локально в браузере (без сервера). Используется Web Crypto API для крипто-стойкого случайного выбора.
+  </div>
+</div>
+
+<script>
+(() => {
+  const LAT_LOWER = "abcdefghijklmnopqrstuvwxyz";
+  const LAT_UPPER = LAT_LOWER.toUpperCase();
+  const CYR_LOWER = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
+  const CYR_UPPER = CYR_LOWER.toUpperCase();
+  const DIGITS = "0123456789";
+  const SPECIAL = `!"#$%&'()*+,-./:;<=>?@[\\]^_\`{|}~`;
+
+  const el = id => document.getElementById(id);
+  const out = el('out');
+  const getRandomInt = (max) => {
+    // вернёт случайное число 0..max-1
+    const array = new Uint32Array(1);
+    window.crypto.getRandomValues(array);
+    return array[0] % max;
+  };
+
+  function secureChoice(str) {
+    return str.charAt(getRandomInt(str.length));
+  }
+
+  function shuffle(array) {
+    // Fisher-Yates с crypto
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = getRandomInt(i + 1);
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  function buildSets(options) {
+    const sets = [];
+    const caseMode = options.case;
+    if (options.latin) {
+      if (caseMode === 'upper') sets.push(LAT_UPPER);
+      else if (caseMode === 'lower') sets.push(LAT_LOWER);
+      else sets.push(LAT_LOWER, LAT_UPPER);
+    }
+    if (options.cyr) {
+      if (caseMode === 'upper') sets.push(CYR_UPPER);
+      else if (caseMode === 'lower') sets.push(CYR_LOWER);
+      else sets.push(CYR_LOWER, CYR_UPPER);
+    }
+    if (options.digits) sets.push(DIGITS);
+    if (options.special) sets.push(SPECIAL);
+    return sets;
+  }
+
+  function removeSimilar(s) {
+    const bad = new Set(['O','0','I','l']);
+    return Array.from(s).filter(ch => !bad.has(ch)).join('');
+  }
+
+  function generateOne(length, sets) {
+    if (sets.length === 0) throw new Error('Выберите хотя бы один набор символов');
+    if (length < sets.length) throw new Error('Длина меньше числа выбранных категорий');
+
+    const pw = [];
+    // гарантируем по одному символу из каждой выбранной категории
+    for (const s of sets) pw.push(secureChoice(s));
+    const pool = sets.join('');
+    for (let i = pw.length; i < length; i++) pw.push(secureChoice(pool));
+    return shuffle(pw).join('');
+  }
+
+  document.getElementById('gen').addEventListener('click', () => {
+    try {
+      const options = {
+        latin: el('latin').checked,
+        cyr: el('cyr').checked,
+        digits: el('digits').checked,
+        special: el('special').checked,
+        case: el('case').value,
+        avoidSimilar: el('avoidSimilar').checked
+      };
+      let length = parseInt(el('length').value, 10) || 12;
+      const count = Math.min(Math.max(parseInt(el('count').value,10)||1,1),20);
+
+      let sets = buildSets(options);
+
+      if (options.avoidSimilar) {
+        sets = sets.map(s => removeSimilar(s)).filter(Boolean);
+      }
+
+      if (sets.length === 0) {
+        out.textContent = 'Ошибка: выберите хотя бы один тип символов.';
+        return;
+      }
+      if (length < sets.length) {
+        out.textContent = `Ошибка: длина должна быть ≥ ${sets.length} (выбрано наборов).`;
+        return;
+      }
+
+      const results = [];
+      for (let i=0;i<count;i++){
+        results.push(generateOne(length, sets));
+      }
+      out.innerHTML = results.map(r=>`<div>${r}</div>`).join('');
+    } catch (e) {
+      out.textContent = 'Ошибка: ' + (e.message || e);
+    }
+  });
+
+  document.getElementById('clear').addEventListener('click', () => { out.textContent = ''; });
+
+  document.getElementById('copy').addEventListener('click', async () => {
+    const text = out.textContent.trim();
+    if (!text) return alert('Нечего копировать');
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Скопировано в буфер обмена');
+    } catch (err) {
+      alert('Не удалось скопировать: ' + err);
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
